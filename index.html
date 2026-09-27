@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>即時天氣儀錶板</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink-900: #f7f9ff;
+      --ink-600: #9eabc2;
+      --aqua-500: #37d7f2;
+      --blue-500: #5d7cff;
+      --purple-500: #9566ff;
+      --sun-500: #f8bd4f;
+      --panel: #0f1523;
+      --surface: #151d2d;
+      --surface-raised: #1a2437;
+      --line: rgba(157, 171, 199, 0.16);
+      --shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      color: var(--ink-900);
+      background: linear-gradient(180deg, #080b13 0%, #0b1120 100%);
+    }
+
+    main {
+      width: min(1240px, 100%);
+      min-width: 0;
+      margin: 0 auto;
+    }
+
+    .dashboard {
+      position: relative;
+      overflow: hidden;
+      padding: clamp(20px, 3vw, 32px);
+      border: 1px solid rgba(157, 171, 199, 0.12);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .dashboard::before {
+      content: none;
+    }
+
+    .header,
+    .filters,
+    .current-grid,
+    .charts-grid,
+    .chart-wrap,
+    .error-message {
+      position: relative;
+      z-index: 1;
+    }
+
+    .kicker {
+      margin: 0 0 5px;
+      color: transparent;
+      background: linear-gradient(90deg, var(--aqua-500), var(--purple-500));
+      background-clip: text;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 24px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .update-panel {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-times {
+      display: grid;
+      justify-items: end;
+      gap: 5px;
+    }
+
+    .last-updated {
+      margin: 0;
+      color: var(--ink-600);
+      font-size: 0.86rem;
+      white-space: nowrap;
+    }
+
+    .refresh-button {
+      min-height: 40px;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 6px;
+      color: #ffffff;
+      background: linear-gradient(135deg, var(--blue-500), var(--purple-500));
+      box-shadow: 0 8px 20px rgba(93, 124, 255, 0.24);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 160ms ease, transform 160ms ease;
+    }
+
+    .refresh-button:hover {
+      background: linear-gradient(135deg, #6f8cff, #a176ff);
+    }
+
+    .refresh-button:active {
+      transform: translateY(1px);
+    }
+
+    .refresh-button:focus-visible {
+      outline: 3px solid rgba(149, 102, 255, 0.5);
+      outline-offset: 3px;
+    }
+
+    .refresh-button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.65rem, 3vw, 2.3rem);
+      line-height: 1.12;
+      font-weight: 800;
+    }
+
+    .subtitle {
+      max-width: 620px;
+      margin: 7px 0 0;
+      color: var(--ink-600);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .filters {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-top: 18px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    }
+
+    .filter-field {
+      display: grid;
+      min-width: 0;
+      gap: 7px;
+    }
+
+    .filter-label {
+      color: var(--ink-600);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .city-select {
+      min-width: 168px;
+      height: 40px;
+      padding: 0 38px 0 12px;
+      border: 1px solid rgba(157, 171, 199, 0.28);
+      border-radius: 6px;
+      color: var(--ink-900);
+      background: #101827;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .city-select:focus-visible,
+    .range-button:focus-visible {
+      outline: 3px solid rgba(149, 102, 255, 0.48);
+      outline-offset: 2px;
+    }
+
+    .range-control {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(92px, 1fr));
+      padding: 3px;
+      border: 1px solid rgba(157, 171, 199, 0.2);
+      border-radius: 7px;
+      background: #0d1422;
+    }
+
+    .range-button {
+      min-height: 34px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--ink-600);
+      background: transparent;
+      font: inherit;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .range-button[aria-pressed="true"] {
+      color: #ffffff;
+      background: linear-gradient(135deg, var(--blue-500), var(--purple-500));
+      box-shadow: 0 5px 14px rgba(93, 124, 255, 0.28);
+    }
+
+    .current-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .metric-card {
+      min-width: 0;
+      padding: 18px 20px 20px;
+      border: 1px solid rgba(157, 171, 199, 0.14);
+      border-top: 4px solid var(--aqua-500);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+    }
+
+    .metric-card:nth-child(2) {
+      border-top-color: #7595ff;
+    }
+
+    .metric-card:nth-child(3) {
+      border-top-color: var(--sun-500);
+    }
+
+    .metric-card:nth-child(1) .metric-value {
+      color: #67e8f9;
+    }
+
+    .metric-card:nth-child(2) .metric-value {
+      color: #a9baff;
+    }
+
+    .metric-card:nth-child(3) .metric-value {
+      color: #ffd477;
+    }
+
+    .metric-label {
+      margin: 0 0 8px;
+      color: var(--ink-600);
+      font-size: 0.88rem;
+      font-weight: 700;
+    }
+
+    .metric-value {
+      display: inline-block;
+      min-width: 2.4ch;
+      font-size: clamp(2rem, 4vw, 2.65rem);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      transform-origin: left center;
+    }
+
+    .metric-value--updating {
+      animation: metric-settle 560ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    @keyframes metric-settle {
+      0% {
+        opacity: 0.72;
+        transform: translateY(5px) scale(0.98);
+      }
+      55% {
+        opacity: 1;
+        transform: translateY(-2px) scale(1.025);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .metric-unit {
+      margin-left: 4px;
+      color: var(--ink-600);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .chart-wrap {
+      grid-column: 1 / -1;
+      height: clamp(350px, 46vw, 500px);
+      min-height: 340px;
+      padding: clamp(14px, 2vw, 22px);
+      border: 1px solid rgba(157, 171, 199, 0.14);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+    }
+
+    .chart-wrap--trend {
+      grid-column: span 8;
+    }
+
+    .chart-wrap--comparison {
+      grid-column: span 4;
+    }
+
+    .chart-wrap--map {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: clamp(400px, 44vw, 520px);
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .map-title {
+      margin: 0;
+      padding: 18px 20px 14px;
+      font-size: 1.15rem;
+      line-height: 1.3;
+      text-align: center;
+    }
+
+    .temperature-map {
+      width: 100%;
+      min-height: 0;
+      background: #101827;
+    }
+
+    .temperature-map .leaflet-tile-pane {
+      filter: brightness(0.58) saturate(0.72) contrast(1.12);
+    }
+
+    .temperature-map .leaflet-control-zoom a {
+      border-color: var(--line);
+      color: var(--ink-900);
+      background: var(--surface-raised);
+    }
+
+    .temperature-map .leaflet-control-attribution {
+      color: var(--ink-600);
+      background: rgba(15, 21, 35, 0.86);
+    }
+
+    .temperature-map .leaflet-control-attribution a {
+      color: #aebcff;
+    }
+
+    .temperature-tooltip {
+      display: grid;
+      gap: 3px;
+      padding: 7px 10px;
+      border: 1px solid rgba(157, 171, 199, 0.25);
+      border-radius: 6px;
+      color: var(--ink-900);
+      background: rgba(15, 21, 35, 0.94);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+      font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      font-size: 0.82rem;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    .temperature-tooltip::before {
+      border-top-color: rgba(15, 21, 35, 0.94);
+    }
+
+    .temperature-tooltip strong {
+      font-size: 0.9rem;
+    }
+
+    .error-message {
+      margin: 18px 0 0;
+      padding: 12px 14px;
+      border-left: 4px solid #fb7185;
+      color: #fecdd3;
+      background: rgba(159, 18, 57, 0.22);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    canvas {
+      width: 100%;
+      max-width: 100%;
+      height: 100%;
+    }
+
+    @media (max-width: 980px) {
+      .chart-wrap--trend,
+      .chart-wrap--comparison {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 720px) {
+      body {
+        padding: 0;
+        background: var(--panel);
+      }
+
+      .dashboard {
+        padding: 18px 16px 22px;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .current-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .filters {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 14px;
+      }
+
+      .city-select {
+        width: 100%;
+      }
+
+      .chart-wrap {
+        height: 380px;
+        min-height: 380px;
+      }
+
+      .chart-wrap--map {
+        height: 420px;
+        min-height: 420px;
+      }
+
+      .header {
+        grid-template-columns: 1fr;
+      }
+
+      .update-panel {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .status-times {
+        justify-items: start;
+      }
+
+      .last-updated {
+        white-space: normal;
+      }
+
+      .range-control {
+        width: 100%;
+      }
+
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .metric-value--updating {
+        animation: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="dashboard" aria-labelledby="page-title">
+      <div class="header">
+        <div>
+          <p class="kicker">Weather outlook</p>
+          <h1 id="page-title">即時天氣儀錶板</h1>
+          <p class="subtitle">從 Open-Meteo 讀取即時天氣資料，每 60 秒自動同步並更新圖表。</p>
+        </div>
+        <div class="update-panel">
+          <div class="status-times">
+            <p class="last-updated">資料時間：<time id="dataTimestamp">--</time></p>
+            <p class="last-updated">最後更新時間：<time id="lastUpdated" aria-live="polite">--:--:--</time></p>
+          </div>
+          <button class="refresh-button" id="refreshButton" type="button">立即更新</button>
+        </div>
+      </div>
+
+      <div class="filters" aria-label="天氣資料篩選器">
+        <label class="filter-field" for="citySelect">
+          <span class="filter-label">城市</span>
+          <select class="city-select" id="citySelect">
+            <option value="taipei">台北</option>
+            <option value="taichung">台中</option>
+            <option value="kaohsiung">高雄</option>
+          </select>
+        </label>
+
+        <div class="filter-field">
+          <span class="filter-label" id="rangeLabel">時間範圍</span>
+          <div class="range-control" role="group" aria-labelledby="rangeLabel">
+            <button class="range-button" type="button" data-hours="24" aria-pressed="true">24 小時</button>
+            <button class="range-button" type="button" data-hours="168" aria-pressed="false">7 天</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="current-grid" id="currentWeather" aria-label="台北目前天氣">
+        <article class="metric-card">
+          <p class="metric-label">目前溫度</p>
+          <span class="metric-value" id="currentTemperature">--</span><span class="metric-unit" id="temperatureUnit">°C</span>
+        </article>
+        <article class="metric-card">
+          <p class="metric-label">目前濕度</p>
+          <span class="metric-value" id="currentHumidity">--</span><span class="metric-unit" id="humidityUnit">%</span>
+        </article>
+        <article class="metric-card">
+          <p class="metric-label">目前風速</p>
+          <span class="metric-value" id="currentWindSpeed">--</span><span class="metric-unit" id="windSpeedUnit">km/h</span>
+        </article>
+      </div>
+
+      <p class="error-message" id="weatherError" role="alert" hidden></p>
+
+      <div class="charts-grid" aria-label="天氣圖表">
+        <div class="chart-wrap chart-wrap--trend">
+          <canvas id="temperatureChart" aria-label="台北未來 24 小時氣溫趨勢折線圖" role="img"></canvas>
+        </div>
+        <div class="chart-wrap chart-wrap--comparison">
+          <canvas id="cityComparisonChart" aria-label="台北、台中與高雄目前溫度比較長條圖" role="img"></canvas>
+        </div>
+        <section class="chart-wrap chart-wrap--map" aria-labelledby="temperatureMapTitle">
+          <h2 class="map-title" id="temperatureMapTitle">各城市目前溫度地圖</h2>
+          <div class="temperature-map" id="cityTemperatureMap" aria-label="台北、台中與高雄目前溫度地圖"></div>
+        </section>
+      </div>
+
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const weatherDataUrl = "https://api.open-meteo.com/v1/forecast";
+    const cities = {
+      taipei: { name: "台北", latitude: 25.03, longitude: 121.56 },
+      taichung: { name: "台中", latitude: 24.15, longitude: 120.68 },
+      kaohsiung: { name: "高雄", latitude: 22.63, longitude: 120.30 }
+    };
+    let selectedHours = 24;
+    let latestRequestId = 0;
+    const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const metricAnimations = new WeakMap();
+    const chartAnimation = reducedMotionQuery.matches ? false : {
+      duration: 820,
+      easing: "easeOutQuart"
+    };
+    const chartTooltipStyle = {
+      backgroundColor: "rgba(8, 11, 19, 0.96)",
+      titleColor: "#f7f9ff",
+      bodyColor: "#dce4f4",
+      borderColor: "rgba(111, 140, 255, 0.75)",
+      borderWidth: 1,
+      cornerRadius: 6,
+      padding: 12,
+      caretPadding: 8,
+      caretSize: 7,
+      displayColors: false,
+      titleFont: {
+        size: 13,
+        weight: "700"
+      },
+      bodyFont: {
+        size: 13,
+        weight: "600"
+      }
+    };
+
+    const temperatureContext = document.getElementById("temperatureChart").getContext("2d");
+    const gradient = temperatureContext.createLinearGradient(0, 0, 0, 420);
+    gradient.addColorStop(0, "rgba(93, 124, 255, 0.42)");
+    gradient.addColorStop(0.55, "rgba(149, 102, 255, 0.16)");
+    gradient.addColorStop(1, "rgba(149, 102, 255, 0)");
+
+    const temperatureChart = new Chart(temperatureContext, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [{
+          label: "氣溫",
+          data: [],
+          borderColor: "#6f8cff",
+          backgroundColor: gradient,
+          pointBackgroundColor: "#c084fc",
+          pointBorderColor: "#151d2d",
+          pointBorderWidth: 2,
+          pointHoverRadius: 7,
+          pointRadius: 4,
+          borderWidth: 4,
+          fill: true,
+          tension: 0.38
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: chartAnimation,
+        interaction: {
+          intersect: false,
+          mode: "index"
+        },
+        plugins: {
+          title: {
+            display: true,
+            text: "台北最近 24 筆溫度趨勢",
+            color: "#f7f9ff",
+            font: {
+              size: 22,
+              weight: "700"
+            },
+            padding: {
+              bottom: 18
+            }
+          },
+          legend: {
+            labels: {
+              color: "#b8c3d8",
+              font: {
+                size: 14
+              },
+              usePointStyle: true
+            }
+          },
+          tooltip: {
+            ...chartTooltipStyle,
+            callbacks: {
+              label(context) {
+                return ` 氣溫：${context.parsed.y} °C`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            title: {
+              display: true,
+              text: "時間",
+              color: "#9eabc2",
+              font: {
+                size: 14,
+                weight: "700"
+              }
+            },
+            grid: {
+              color: "rgba(157, 171, 199, 0.12)"
+            },
+            ticks: {
+              color: "#9eabc2",
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 12
+            }
+          },
+          y: {
+            title: {
+              display: true,
+              text: "氣溫（°C）",
+              color: "#9eabc2",
+              font: {
+                size: 14,
+                weight: "700"
+              }
+            },
+            suggestedMin: 20,
+            suggestedMax: 32,
+            grid: {
+              color: "rgba(157, 171, 199, 0.12)"
+            },
+            ticks: {
+              color: "#9eabc2",
+              callback(value) {
+                return `${value}°C`;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const comparisonContext = document.getElementById("cityComparisonChart").getContext("2d");
+    const cityComparisonChart = new Chart(comparisonContext, {
+      type: "bar",
+      data: {
+        labels: [],
+        datasets: [{
+          label: "目前溫度",
+          data: [],
+          backgroundColor: [],
+          borderColor: [],
+          borderWidth: 1,
+          borderRadius: 6,
+          borderSkipped: false,
+          barPercentage: 0.62
+        }]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: chartAnimation,
+        interaction: {
+          intersect: false,
+          mode: "nearest",
+          axis: "y"
+        },
+        plugins: {
+          title: {
+            display: true,
+            text: "各城市目前溫度比較",
+            color: "#f7f9ff",
+            font: {
+              size: 18,
+              weight: "700"
+            },
+            padding: {
+              bottom: 18
+            }
+          },
+          legend: {
+            display: false
+          },
+          tooltip: {
+            ...chartTooltipStyle,
+            callbacks: {
+              label(context) {
+                return ` 溫度：${context.parsed.x} °C`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            suggestedMin: 20,
+            suggestedMax: 36,
+            title: {
+              display: true,
+              text: "目前溫度（°C）",
+              color: "#9eabc2",
+              font: {
+                size: 13,
+                weight: "700"
+              }
+            },
+            grid: {
+              color: "rgba(157, 171, 199, 0.12)"
+            },
+            ticks: {
+              color: "#9eabc2",
+              callback(value) {
+                return `${value}°C`;
+              }
+            }
+          },
+          y: {
+            grid: {
+              display: false
+            },
+            ticks: {
+              color: "#dce4f4",
+              font: {
+                size: 14,
+                weight: "700"
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const cityTemperatureMap = L.map("cityTemperatureMap", {
+      scrollWheelZoom: false
+    }).setView([23.8, 120.9], 7);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(cityTemperatureMap);
+    const cityTemperatureLayer = L.layerGroup().addTo(cityTemperatureMap);
+
+    const lastUpdated = document.getElementById("lastUpdated");
+    const dataTimestamp = document.getElementById("dataTimestamp");
+    const refreshButton = document.getElementById("refreshButton");
+    const citySelect = document.getElementById("citySelect");
+    const rangeButtons = document.querySelectorAll(".range-button");
+    const currentWeather = document.getElementById("currentWeather");
+    const temperatureCanvas = document.getElementById("temperatureChart");
+    const weatherError = document.getElementById("weatherError");
+    const currentTemperature = document.getElementById("currentTemperature");
+    const currentHumidity = document.getElementById("currentHumidity");
+    const currentWindSpeed = document.getElementById("currentWindSpeed");
+    const temperatureUnit = document.getElementById("temperatureUnit");
+    const humidityUnit = document.getElementById("humidityUnit");
+    const windSpeedUnit = document.getElementById("windSpeedUnit");
+
+    function parseTaipeiDate(value) {
+      let normalized = String(value).trim().replaceAll("/", "-").replace(" ", "T");
+      if (!normalized.includes("T")) normalized += "T00:00";
+      if (!/(Z|[+-]\d{2}:\d{2})$/.test(normalized)) normalized += "+08:00";
+      return Date.parse(normalized);
+    }
+
+    function formatForecastTime(timestamp) {
+      return new Intl.DateTimeFormat("zh-TW", {
+        timeZone: "Asia/Taipei",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).format(new Date(timestamp));
+    }
+
+    function formatDataTime(timestamp) {
+      return new Intl.DateTimeFormat("zh-TW", {
+        timeZone: "Asia/Taipei",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      }).format(new Date(timestamp));
+    }
+
+    function getTemperatureColor(temperature, minimum, maximum, alpha) {
+      const ratio = maximum === minimum ? 0.5 : (temperature - minimum) / (maximum - minimum);
+      const cold = [77, 150, 255];
+      const hot = [255, 91, 103];
+      const channels = cold.map((value, index) => Math.round(value + (hot[index] - value) * ratio));
+      return `rgba(${channels.join(", ")}, ${alpha})`;
+    }
+
+    function animateMetric(element, nextValue) {
+      const target = Number(nextValue);
+      if (!Number.isFinite(target)) {
+        element.textContent = "--";
+        return;
+      }
+
+      const previousAnimation = metricAnimations.get(element);
+      if (previousAnimation) cancelAnimationFrame(previousAnimation);
+
+      const current = Number(element.textContent);
+      const decimalText = String(nextValue).split(".")[1] || "";
+      const decimalPlaces = decimalText.length;
+      const formatValue = (value) => value.toFixed(decimalPlaces);
+      if (current === target || reducedMotionQuery.matches) {
+        element.textContent = formatValue(target);
+        return;
+      }
+
+      const start = Number.isFinite(current) ? current : 0;
+      const startTime = performance.now();
+      const duration = 680;
+      element.classList.remove("metric-value--updating");
+      void element.offsetWidth;
+      element.classList.add("metric-value--updating");
+
+      function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const easedProgress = 1 - Math.pow(1 - progress, 3);
+        element.textContent = formatValue(start + (target - start) * easedProgress);
+        if (progress < 1) {
+          metricAnimations.set(element, requestAnimationFrame(step));
+        } else {
+          metricAnimations.delete(element);
+        }
+      }
+
+      metricAnimations.set(element, requestAnimationFrame(step));
+    }
+
+    function updateTemperatureMap(cityTemperatures, minimum, maximum) {
+      cityTemperatureLayer.clearLayers();
+      cityTemperatures.forEach((city) => {
+        const markerColor = getTemperatureColor(city.temperature, minimum, maximum, 1);
+        L.circleMarker([city.latitude, city.longitude], {
+          radius: 13,
+          color: "#f7f9ff",
+          weight: 2,
+          fillColor: markerColor,
+          fillOpacity: 0.9
+        })
+          .bindTooltip(`<strong>${city.name}</strong><span>${city.temperature} °C</span>`, {
+            permanent: true,
+            direction: "top",
+            offset: [0, -12],
+            className: "temperature-tooltip"
+          })
+          .addTo(cityTemperatureLayer);
+      });
+      cityTemperatureMap.invalidateSize();
+    }
+
+    async function fetchCityTemperatures() {
+      const cityList = Object.values(cities);
+      const parameters = new URLSearchParams({
+        latitude: cityList.map((city) => city.latitude).join(","),
+        longitude: cityList.map((city) => city.longitude).join(","),
+        current: "temperature_2m",
+        timezone: "Asia/Taipei"
+      });
+
+      const response = await fetch(`${weatherDataUrl}?${parameters}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`城市比較資料回應錯誤：${response.status}`);
+
+      const data = await response.json();
+      if (!Array.isArray(data) || data.length !== cityList.length) {
+        throw new Error("城市比較資料格式不完整");
+      }
+
+      return cityList.map((city, index) => ({
+        name: city.name,
+        latitude: city.latitude,
+        longitude: city.longitude,
+        temperature: data[index].current.temperature_2m
+      }));
+    }
+
+    async function fetchWeatherData(city, hours) {
+      const parameters = new URLSearchParams({
+        latitude: city.latitude,
+        longitude: city.longitude,
+        current: "temperature_2m,relative_humidity_2m,wind_speed_10m",
+        hourly: "temperature_2m",
+        forecast_hours: String(hours),
+        timezone: "Asia/Taipei"
+      });
+
+      const response = await fetch(`${weatherDataUrl}?${parameters}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Open-Meteo 回應錯誤：${response.status}`);
+
+      const data = await response.json();
+      if (!data.current || !data.hourly?.time || !data.hourly?.temperature_2m) {
+        throw new Error("天氣資料格式不完整");
+      }
+
+      const current = {
+        timestamp: parseTaipeiDate(data.current.time),
+        temperature: data.current.temperature_2m,
+        humidity: data.current.relative_humidity_2m,
+        windSpeed: data.current.wind_speed_10m
+      };
+      const futureRows = data.hourly.time
+        .map((time, index) => ({
+          timestamp: parseTaipeiDate(time),
+          temperature: data.hourly.temperature_2m[index]
+        }))
+        .filter((row) => row.timestamp > current.timestamp);
+
+      return {
+        current,
+        chartRows: [
+          { timestamp: current.timestamp, temperature: current.temperature },
+          ...futureRows
+        ].slice(0, hours)
+      };
+    }
+
+    async function updateDashboard() {
+      const requestId = ++latestRequestId;
+      const city = cities[citySelect.value];
+      const rangeLabel = selectedHours === 24 ? "24 小時" : "7 天";
+      refreshButton.disabled = true;
+      refreshButton.textContent = "更新中...";
+      weatherError.hidden = true;
+
+      try {
+        const [weatherData, cityTemperatures] = await Promise.all([
+          fetchWeatherData(city, selectedHours),
+          fetchCityTemperatures()
+        ]);
+        if (requestId !== latestRequestId) return;
+
+        animateMetric(currentTemperature, weatherData.current.temperature);
+        animateMetric(currentHumidity, weatherData.current.humidity);
+        animateMetric(currentWindSpeed, weatherData.current.windSpeed);
+        temperatureUnit.textContent = "°C";
+        humidityUnit.textContent = "%";
+        windSpeedUnit.textContent = "km/h";
+        dataTimestamp.dateTime = new Date(weatherData.current.timestamp).toISOString();
+        dataTimestamp.textContent = formatDataTime(weatherData.current.timestamp);
+
+        currentWeather.setAttribute("aria-label", `${city.name}目前天氣`);
+        temperatureCanvas.setAttribute("aria-label", `${city.name}未來 ${rangeLabel}氣溫趨勢折線圖`);
+        temperatureChart.options.plugins.title.text = `${city.name}未來 ${rangeLabel}氣溫趨勢`;
+        temperatureChart.data.labels = weatherData.chartRows.map((row) => formatForecastTime(row.timestamp));
+        temperatureChart.data.datasets[0].data = weatherData.chartRows.map((row) => row.temperature);
+        temperatureChart.data.datasets[0].pointRadius = selectedHours === 24 ? 4 : 1.5;
+        temperatureChart.data.datasets[0].pointHoverRadius = selectedHours === 24 ? 7 : 5;
+        temperatureChart.update();
+
+        const temperatures = cityTemperatures.map((item) => item.temperature);
+        const minimumTemperature = Math.min(...temperatures);
+        const maximumTemperature = Math.max(...temperatures);
+        cityComparisonChart.data.labels = cityTemperatures.map((item) => item.name);
+        cityComparisonChart.data.datasets[0].data = temperatures;
+        cityComparisonChart.data.datasets[0].backgroundColor = temperatures.map((temperature) =>
+          getTemperatureColor(temperature, minimumTemperature, maximumTemperature, 0.78)
+        );
+        cityComparisonChart.data.datasets[0].borderColor = temperatures.map((temperature) =>
+          getTemperatureColor(temperature, minimumTemperature, maximumTemperature, 1)
+        );
+        cityComparisonChart.options.scales.x.min = Math.floor(minimumTemperature - 2);
+        cityComparisonChart.options.scales.x.max = Math.ceil(maximumTemperature + 2);
+        cityComparisonChart.update();
+        updateTemperatureMap(cityTemperatures, minimumTemperature, maximumTemperature);
+
+        const now = new Date();
+        lastUpdated.dateTime = now.toISOString();
+        lastUpdated.textContent = now.toLocaleTimeString("zh-TW", { hour12: false });
+      } catch (error) {
+        if (requestId === latestRequestId) {
+          weatherError.textContent = `目前無法讀取天氣資料。原因：${error.message}`;
+          weatherError.hidden = false;
+          console.error(error);
+        }
+      } finally {
+        if (requestId === latestRequestId) {
+          refreshButton.disabled = false;
+          refreshButton.textContent = "立即更新";
+        }
+      }
+    }
+
+    refreshButton.addEventListener("click", updateDashboard);
+    citySelect.addEventListener("change", updateDashboard);
+    rangeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedHours = Number(button.dataset.hours);
+        rangeButtons.forEach((rangeButton) => {
+          rangeButton.setAttribute("aria-pressed", String(rangeButton === button));
+        });
+        updateDashboard();
+      });
+    });
+    updateDashboard();
+    setInterval(updateDashboard, 60_000);
+  </script>
+</body>
+</html>
